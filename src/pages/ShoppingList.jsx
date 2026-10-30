@@ -5,8 +5,8 @@ import { useRoomMate } from '../context/useRoomMate';
 const emptyItem = { item: '', quantity: '', status: 'Pending' };
 
 export default function ShoppingList() {
-  const { shopping, room, profile, saving, addShoppingItem, updateShopping, deleteShopping } = useRoomMate();
-  const canManageShopping = profile.role === 'Member';
+  const { shopping, room, saving, isMember, addShoppingItem, updateShopping, deleteShopping } = useRoomMate();
+  const canManageShopping = isMember;
   const [tab, setTab] = useState('Pending');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState(emptyItem);
@@ -39,7 +39,7 @@ export default function ShoppingList() {
         </div>
         {canManageShopping && <button type="button" className="primary-btn" onClick={openAddModal} disabled={!room || saving}>+ Add Item</button>}
       </div>
-      {!room && <p className="empty-message">Create or join a room in My Room before adding shopping items.</p>}
+      {!room && <p className="empty-message">Create a room in My Room before adding shopping items.</p>}
 
       <div className="toolbar-row">
         <div className="filter-group">

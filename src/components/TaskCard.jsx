@@ -1,4 +1,4 @@
-export default function TaskCard({ task, onToggle, onEdit, onDelete, canManage = true }) {
+export default function TaskCard({ task, onToggle, onEdit, onDelete, canManage = true, canComplete = false }) {
   return (
     <div className="task-row">
       <div className="task-main">
@@ -16,7 +16,7 @@ export default function TaskCard({ task, onToggle, onEdit, onDelete, canManage =
         </span>
       </div>
       {canManage && <div className="task-actions">
-        <button type="button" onClick={() => onToggle(task.id)}>{task.status === 'Completed' ? 'Undo' : 'Done'}</button>
+        {canComplete && <button type="button" onClick={() => onToggle(task.id)}>{task.status === 'Completed' ? 'Undo' : 'Done'}</button>}
         <button type="button" onClick={() => onEdit(task)}>Edit</button>
         <button type="button" className="danger" onClick={() => onDelete(task.id)}>Delete</button>
       </div>}

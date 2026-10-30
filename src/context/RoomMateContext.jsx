@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RoomMateContext } from './roomMateContext';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+import { apiRequest, clearStoredSession, storeAuthSession, TOKEN_STORAGE_KEY, USER_STORAGE_KEY } from '../services/api';
 
 const initialsFor = (name = '') =>
   name.split(' ').filter(Boolean).map((part) => part[0]).slice(0, 2).join('').toUpperCase() || 'RM';
 
-const normalizeRoom = (roomData, currentUserId, expenses, role) => {
+const normalizeRoom = (roomData, currentUserId, expenses) => {
   if (!roomData) return null;
 
   const members = (roomData.members || []).map((member) => ({
     id: member.id,
     name: member.name,
     initials: initialsFor(member.name),
-    isOwner: false,
-    role: 'Member',
+    isOwner: member.role === 'OWNER',
+    role: member.role === 'OWNER' ? 'Owner / Manager' : 'Member',
   }));
   const owner = roomData.created_by ? {
     id: roomData.created_by,
@@ -23,11 +22,12 @@ const normalizeRoom = (roomData, currentUserId, expenses, role) => {
     isOwner: true,
     role: 'Owner / Manager',
   } : null;
-  const activeMembers = members;
+  const activeMembers = members.filter((member) => !member.isOwner);
   const rentFromExpenses = expenses
     .filter((expense) => expense.category?.toLowerCase() === 'rent')
     .reduce((total, expense) => total + Number(expense.amount || 0), 0);
   const monthlyRent = Number(roomData.monthly_rent ?? rentFromExpenses);
+  const isCurrentUserOwner = Number(roomData.created_by) === Number(currentUserId);
 
   return {
     id: roomData.id,
@@ -35,27 +35,33 @@ const normalizeRoom = (roomData, currentUserId, expenses, role) => {
     createdBy: roomData.created_by,
     owner,
     monthlyRent,
-    yourShare: role === 'Owner' || activeMembers.length === 0 ? 0 : monthlyRent / activeMembers.length,
+    yourShare: isCurrentUserOwner || activeMembers.length === 0 ? 0 : monthlyRent / activeMembers.length,
     activeMemberCount: activeMembers.length,
     members,
   };
 };
 
-const normalizeExpense = (expense, members) => ({
-  id: expense.id,
-  title: expense.title,
-  amount: Number(expense.amount || 0),
-  paidBy: expense.paid_by,
-  date: String(expense.expense_date || expense.created_at || '').slice(0, 10),
-  category: expense.category,
-  splitType: expense.split_type,
-  splitBetween: members.map((member) => ({
+const normalizeExpense = (expense, members) => {
+  const memberNames = new Set(members.map((member) => member.name.toLowerCase()));
+  const splitBetween = expense.split_between || members.map((member) => ({
     name: member.name,
-    amount: members.length
-      ? Number(expense.amount || 0) / members.length
-      : 0,
-  })),
-});
+    amount: members.length ? Number(expense.amount || 0) / members.length : 0,
+  }));
+
+  return {
+    id: expense.id,
+    roomId: expense.room_id,
+    title: expense.title,
+    amount: Number(expense.amount || 0),
+    paidBy: expense.paid_by,
+    date: String(expense.expense_date || expense.created_at || '').slice(0, 10),
+    category: expense.category,
+    splitType: expense.split_type,
+    splitBetween: splitBetween
+      .filter((share) => memberNames.has(share.name.toLowerCase()))
+      .map((share) => ({ name: share.name, amount: Number(share.amount || 0) })),
+  };
+};
 
 const normalizeTask = (task) => ({
   id: task.id,
@@ -68,13 +74,22 @@ const normalizeTask = (task) => ({
 
 const normalizeShopping = (item) => ({
   id: item.id,
-  item: item.item_name || item.item,
+  item: item.item_name || item.itemName || item.item,
   quantity: item.quantity || '1',
   status: item.status || 'Pending',
 });
 
+const profileFor = (user, roomData) => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  avatar: initialsFor(user.name),
+  room: roomData?.room_name || 'No room yet',
+  role: roomData && Number(roomData.created_by) === Number(user.id) ? 'Owner' : 'Member',
+});
+
 export const RoomMateProvider = ({ children }) => {
-  const [token, setToken] = useState(() => localStorage.getItem('roommate_token') || '');
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_STORAGE_KEY) || '');
   const [profile, setProfile] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(Boolean(token));
   const [authLoading, setAuthLoading] = useState(Boolean(token));
@@ -86,6 +101,8 @@ export const RoomMateProvider = ({ children }) => {
   const [tasks, setTasks] = useState([]);
   const [shopping, setShopping] = useState([]);
   const [removedMembers, setRemovedMembers] = useState([]);
+  const isOwner = Boolean(profile && room && Number(room.createdBy) === Number(profile.id));
+  const isMember = Boolean(profile && room && !isOwner && room.members.some((member) => Number(member.id) === Number(profile.id)));
 
   const clearRoomData = useCallback(() => {
     setProfile(null);
@@ -97,7 +114,7 @@ export const RoomMateProvider = ({ children }) => {
   }, []);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('roommate_token');
+    clearStoredSession();
     setToken('');
     setIsLoggedIn(false);
     setAuthLoading(false);
@@ -105,68 +122,37 @@ export const RoomMateProvider = ({ children }) => {
     clearRoomData();
   }, [clearRoomData]);
 
-  const apiRequest = useCallback(async (endpoint, currentToken = token, options = {}) => {
-    let response;
+  useEffect(() => {
+    const handleUnauthorized = () => logout();
+    window.addEventListener('roommate:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('roommate:unauthorized', handleUnauthorized);
+  }, [logout]);
+
+  const loadDashboardData = useCallback(async () => {
     try {
-      response = await fetch(`${API_URL}${endpoint}`, {
-        ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(currentToken ? { Authorization: `Bearer ${currentToken}` } : {}),
-          ...options.headers,
-        },
-      });
-    } catch {
-      throw new Error('Cannot reach the RoomMate backend. Check that the backend server is running.');
-    }
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      if (response.status === 401 || (response.status === 403 && data.message === 'Invalid token')) {
-        logout();
-        throw new Error('Your session expired. Please log in again.');
-      }
-      throw new Error(data.message || 'Request failed. Please try again.');
-    }
-    return data;
-  }, [logout, token]);
-
-  const loadDashboardData = useCallback(async (currentToken = token) => {
-    if (!currentToken) {
-      setAuthLoading(false);
-      return false;
-    }
-
-    try {
-      const [userResponse, roomResponse, expenseResponse, taskResponse, shoppingResponse] = await Promise.all([
-        apiRequest('/auth/me', currentToken),
-        apiRequest('/rooms', currentToken),
-        apiRequest('/expenses', currentToken),
-        apiRequest('/tasks', currentToken),
-        apiRequest('/shopping', currentToken),
+      const [user, roomResponse, expenseResponse, taskResponse, shoppingResponse] = await Promise.all([
+        apiRequest('/profile'),
+        apiRequest('/rooms'),
+        apiRequest('/expenses'),
+        apiRequest('/tasks'),
+        apiRequest('/shopping'),
       ]);
-      const user = userResponse.user;
-      const roomData = roomResponse.rooms?.[0] || null;
+      const rooms = roomResponse.rooms || [];
+      const roomData = rooms.find((item) =>
+        Number(item.created_by) === Number(user.id)
+        || (item.members || []).some((member) => Number(member.id) === Number(user.id)),
+      ) || null;
       const memberList = roomData?.members || [];
       const expenseRows = expenseResponse.expenses || [];
-      const role = user.role === 'owner' ? 'Owner' : 'Member';
-      const removedResponse = role === 'Owner' && roomData
-        ? await apiRequest(`/rooms/${roomData.id}/removed-members`, currentToken)
-        : { members: [] };
+      const currentProfile = profileFor(user, roomData);
 
-      setProfile({
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        avatar: initialsFor(user.name),
-        room: roomData?.room_name || 'No room yet',
-        role: roomData ? role : user.role === 'owner' ? 'Owner' : 'Member',
-      });
-      setRoom(normalizeRoom(roomData, user.id, expenseRows, role));
+      setProfile(currentProfile);
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
+      setRoom(normalizeRoom(roomData, user.id, expenseRows));
       setExpenses(expenseRows.map((expense) => normalizeExpense(expense, memberList)));
-      setRemovedMembers(removedResponse.members || []);
+      setRemovedMembers([]);
       setTasks((taskResponse.tasks || []).map(normalizeTask));
-      setShopping((shoppingResponse.shoppingItems || []).map(normalizeShopping));
+      setShopping((shoppingResponse.shopping_items || shoppingResponse.shoppingItems || []).map(normalizeShopping));
       setIsLoggedIn(true);
       setError('');
       return true;
@@ -176,29 +162,23 @@ export const RoomMateProvider = ({ children }) => {
       return false;
     } finally {
       setAuthLoading(false);
+      setDataLoading(false);
     }
-  }, [apiRequest, logout, token]);
+  }, [logout]);
 
   useEffect(() => {
     if (token) {
-      loadDashboardData(token);
+      Promise.resolve().then(loadDashboardData);
     }
   }, [loadDashboardData, token]);
 
   const setAuthSession = (authData) => {
-    localStorage.setItem('roommate_token', authData.token);
+    storeAuthSession(authData);
     setToken(authData.token);
     setIsLoggedIn(true);
     setAuthLoading(true);
     setError('');
-    setProfile({
-      id: authData.user.id,
-      name: authData.user.name,
-      email: authData.user.email,
-      avatar: initialsFor(authData.user.name),
-      room: 'No room yet',
-      role: authData.user.role === 'owner' ? 'Owner' : 'Member',
-    });
+    setProfile(profileFor(authData.user, null));
   };
 
   const runMutation = async (operation) => {
@@ -221,87 +201,118 @@ export const RoomMateProvider = ({ children }) => {
     return room.id;
   };
 
+  const requireMember = () => {
+    if (!isMember) throw new Error('Only active Members can manage shared expenses, tasks, and shopping.');
+    return profile.id;
+  };
+
+  const requireOwner = () => {
+    if (!isOwner) throw new Error('Only the room Owner can manage room Members.');
+    return profile.id;
+  };
+
   const createRoom = (roomData) => runMutation(async () => {
-    const result = await apiRequest('/rooms', token, {
+    const result = await apiRequest('/rooms', {
       method: 'POST',
-      body: JSON.stringify({
+      body: {
         room_name: roomData.name.trim(),
         monthly_rent: Number(roomData.monthlyRent),
-      }),
+        created_by: profile.id,
+      },
     });
-    await loadDashboardData(token);
+    await loadDashboardData();
     return result.room;
   });
 
-  const joinRoom = (roomId) => runMutation(async () => {
-    const result = await apiRequest('/rooms/join', token, {
-      method: 'POST',
-      body: JSON.stringify({ room_id: Number(roomId) }),
-    });
-    await loadDashboardData(token);
-    return result;
+const leaveRoom = (roomId) => runMutation(async () => {
+  requireRoom();
+  const result = await apiRequest(`/rooms/${roomId}/members/${profile.id}`, {
+    method: 'DELETE',
+  });
+  await loadDashboardData();
+  return result;
+});
+
+const addRoomMember = (roomId, email) => runMutation(async () => {
+  requireOwner();
+  if (!roomId) {
+    throw new Error('Room not found.');
+  }
+
+  if (!email?.trim()) {
+    throw new Error('Please enter a member email address.');
+  }
+
+  const result = await apiRequest(`/rooms/${roomId}/members`, {
+    method: 'POST',
+    body: {
+      email: email.trim(),
+    },
   });
 
-  const leaveRoom = (roomId) => runMutation(async () => {
-    const result = await apiRequest(`/rooms/${roomId}/members/me`, token, { method: 'DELETE' });
-    await loadDashboardData(token);
-    return result;
-  });
+  await loadDashboardData();
 
-  const removeRoomMember = (roomId, userId) => runMutation(async () => {
-    const result = await apiRequest(`/rooms/${roomId}/members/${userId}`, token, { method: 'DELETE' });
-    await loadDashboardData(token);
-    return result;
-  });
+  return result;
+});
+
+const removeRoomMember = (roomId, userId) => runMutation(async () => {
+  requireOwner();
+  if (!roomId) {
+    throw new Error('Room not found.');
+  }
+
+  if (!userId) {
+    throw new Error('Member not found.');
+  }
+
+  const result = await apiRequest(
+    `/rooms/${roomId}/members/${userId}`,
+    {
+      method: 'DELETE',
+    }
+  );
+
+  await loadDashboardData();
+
+  return result;
+});
 
   const updateRoom = (roomId, updates) => runMutation(async () => {
-    const result = await apiRequest(`/rooms/${roomId}`, token, {
+    requireOwner();
+    const result = await apiRequest(`/rooms/${roomId}`, {
       method: 'PUT',
-      body: JSON.stringify({
+      body: {
         room_name: updates.name,
         monthly_rent: Number(updates.monthlyRent),
-      }),
+      },
     });
-    await loadDashboardData(token);
+    await loadDashboardData();
     return result;
   });
 
   const updateProfile = (updates) => runMutation(async () => {
-    const result = await apiRequest('/auth/profile', token, {
+    if (updates.email.trim().toLowerCase() !== profile.email.toLowerCase()) {
+      throw new Error('Email changes require a new login and are not available in this session.');
+    }
+    const result = await apiRequest(`/users/${profile.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ name: updates.name, email: updates.email }),
+      body: { name: updates.name, email: profile.email },
     });
-    setProfile((current) => current ? {
-      ...current,
-      name: result.user.name,
-      email: result.user.email,
-      avatar: initialsFor(result.user.name),
-    } : current);
-    return result.user;
-  });
-
-  const changePassword = (passwords) => runMutation(() => apiRequest('/auth/change-password', token, {
-    method: 'PUT',
-    body: JSON.stringify({
-      current_password: passwords.currentPassword,
-      new_password: passwords.newPassword,
-      confirm_password: passwords.confirmPassword,
-    }),
-  }));
-
-  const addRoomMember = (roomId, email) => runMutation(async () => {
-    const result = await apiRequest(`/rooms/${roomId}/members`, token, {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
-
-    await loadDashboardData(token);
+    const currentProfile = profileFor(result, room ? {
+      created_by: room.createdBy,
+      room_name: room.name,
+    } : null);
+    setProfile(currentProfile);
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(result));
     return result;
   });
 
   const addExpense = (newExpense) => runMutation(async () => {
+      requireMember();
       const roomId = requireRoom();
-      const payload = {
+      const response = await apiRequest('/expenses', {
+        method: 'POST',
+        body: {
         room_id: roomId,
         title: newExpense.title,
         amount: Number(newExpense.amount),
@@ -309,112 +320,115 @@ export const RoomMateProvider = ({ children }) => {
         paid_by: newExpense.paidBy,
         split_type: 'equal',
         date: newExpense.date,
-      };
-      const response = await apiRequest('/expenses', token, {
-        method: 'POST',
-        body: JSON.stringify(payload),
+        },
       });
-      await loadDashboardData(token);
+      await loadDashboardData();
       return response.expense;
   });
 
   const updateExpense = (updatedExpense) => runMutation(async () => {
-      const result = await apiRequest(`/expenses/${updatedExpense.id}`, token, {
+      requireMember();
+      const result = await apiRequest(`/expenses/${updatedExpense.id}`, {
         method: 'PUT',
-        body: JSON.stringify({
+        body: {
           title: updatedExpense.title,
           amount: Number(updatedExpense.amount),
           category: updatedExpense.category,
           paid_by: updatedExpense.paidBy,
           split_type: 'equal',
           date: updatedExpense.date,
-        }),
+        },
       });
-      await loadDashboardData(token);
+      await loadDashboardData();
       return result;
   });
 
   const deleteExpense = (expenseId) => runMutation(async () => {
-    const result = await apiRequest(`/expenses/${expenseId}`, token, { method: 'DELETE' });
-    await loadDashboardData(token);
+    requireMember();
+    const result = await apiRequest(`/expenses/${expenseId}`, { method: 'DELETE' });
+    await loadDashboardData();
     return result;
   });
 
   const addTask = (newTask) => runMutation(async () => {
+      requireMember();
       const roomId = requireRoom();
-      const response = await apiRequest('/tasks', token, {
+      const response = await apiRequest(`/tasks/${profile.id}`, {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           room_id: roomId,
           title: newTask.title,
           assigned_to: newTask.assignee,
           due_date: newTask.dueDate,
           status: newTask.status || 'Pending',
           priority: newTask.priority || 'Medium',
-        }),
+        },
       });
-      await loadDashboardData(token);
+      await loadDashboardData();
       return response.task;
   });
 
   const updateTask = (taskId, updates) => runMutation(async () => {
+      requireMember();
       const task = tasks.find((item) => item.id === taskId);
       if (!task) throw new Error('Task not found. Refresh the page and try again.');
-      const result = await apiRequest(`/tasks/${taskId}`, token, {
+      const result = await apiRequest(`/tasks/${profile.id}/${taskId}`, {
         method: 'PUT',
-        body: JSON.stringify({
+        body: {
           title: updates.title ?? task.title,
           assigned_to: updates.assignee ?? task.assignee,
           status: updates.status ?? task.status,
           due_date: updates.dueDate ?? task.dueDate,
           priority: updates.priority ?? task.priority,
-        }),
+        },
       });
-      await loadDashboardData(token);
+      await loadDashboardData();
       return result;
   });
 
   const deleteTask = (taskId) => runMutation(async () => {
-    const result = await apiRequest(`/tasks/${taskId}`, token, { method: 'DELETE' });
-    await loadDashboardData(token);
+    requireMember();
+    const result = await apiRequest(`/tasks/${profile.id}/${taskId}`, { method: 'DELETE' });
+    await loadDashboardData();
     return result;
   });
 
   const addShoppingItem = (newItem) => runMutation(async () => {
+      requireMember();
       const roomId = requireRoom();
-      const response = await apiRequest('/shopping', token, {
+      const response = await apiRequest(`/shopping/${profile.id}`, {
         method: 'POST',
-        body: JSON.stringify({
+        body: {
           room_id: roomId,
           item_name: newItem.item,
           quantity: newItem.quantity,
-          added_by: profile.name,
           status: newItem.status || 'Pending',
-        }),
+        },
       });
-      await loadDashboardData(token);
+      await loadDashboardData();
       return response.item;
   });
 
   const updateShopping = (itemId, updates) => runMutation(async () => {
+      requireMember();
       const item = shopping.find((entry) => entry.id === itemId);
       if (!item) throw new Error('Shopping item not found. Refresh the page and try again.');
-      const result = await apiRequest(`/shopping/${itemId}`, token, {
+      const result = await apiRequest(`/shopping/${profile.id}/${itemId}`, {
         method: 'PUT',
-        body: JSON.stringify({
+        body: {
           item_name: updates.item ?? item.item,
           quantity: updates.quantity ?? item.quantity,
           status: updates.status ?? item.status,
-          added_by: profile.name,
-        }),
+        },
       });
-      await loadDashboardData(token);
+      await loadDashboardData();
       return result;
   });
 
   const deleteShopping = (itemId) => runMutation(async () => {
-    const result = await apiRequest(`/shopping/${itemId}`, token, { method: 'DELETE' });
-    await loadDashboardData(token);
+    requireMember();
+    const result = await apiRequest(`/shopping/${profile.id}/${itemId}`, { method: 'DELETE' });
+    await loadDashboardData();
     return result;
   });
 
@@ -426,6 +440,8 @@ export const RoomMateProvider = ({ children }) => {
       dataLoading,
       saving,
       error,
+      isOwner,
+      isMember,
       clearError: () => setError(''),
       setAuthSession,
       room,
@@ -445,12 +461,10 @@ export const RoomMateProvider = ({ children }) => {
       logout,
       loadDashboardData,
       createRoom,
-      joinRoom,
       leaveRoom,
       updateRoom,
       removeRoomMember,
       updateProfile,
-      changePassword,
       addRoomMember,
     };
 

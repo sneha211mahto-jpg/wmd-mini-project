@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useState } from 'react';
 import Modal from '../components/Modal';
 import { useRoomMate } from '../context/useRoomMate';
+import { apiRequest } from '../services/api';
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -12,12 +13,13 @@ export default function Profile() {
     error,
     clearError,
     updateProfile,
-    changePassword,
   } = useRoomMate();
   const [dialog, setDialog] = useState('');
   const [profileForm, setProfileForm] = useState({ name: profile.name, email: profile.email });
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [message, setMessage] = useState('');
+  const [passwordStatus, setPasswordStatus] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const openDialog = (name) => {
     clearError();
@@ -33,12 +35,33 @@ export default function Profile() {
     if (updated) setMessage('Profile updated successfully.');
   };
 
-  const handlePasswordSave = async (event) => {
+  const handlePasswordChange = async (event) => {
     event.preventDefault();
-    const result = await changePassword(passwordForm);
-    if (result) {
+    setMessage('');
+    setPasswordStatus('');
+    clearError();
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setMessage('New passwords do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const result = await apiRequest('/profile/password', {
+        method: 'PUT',
+        body: {
+          current_password: passwordForm.currentPassword,
+          new_password: passwordForm.newPassword,
+        },
+      });
+      setPasswordStatus(result.message || 'Password changed successfully.');
       setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
-      setMessage('Password changed successfully.');
+      setDialog('');
+    } catch (passwordError) {
+      setMessage(passwordError.message || 'Could not change password.');
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
@@ -55,6 +78,8 @@ export default function Profile() {
           </div>
         </div>
       </div>
+
+      {passwordStatus && <p className="success-message" role="status">{passwordStatus}</p>}
 
       <div className="profile-actions">
         <button type="button" className="secondary-btn" onClick={() => openDialog('profile')}>Edit Profile</button>
@@ -89,23 +114,23 @@ export default function Profile() {
         )}
 
         {dialog === 'password' && (
-          <form className="form-grid" onSubmit={handlePasswordSave}>
+          <form className="form-grid" onSubmit={handlePasswordChange}>
             <label>
               <span>Current Password</span>
-              <input type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required />
+              <input type="password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })} required />
             </label>
             <label>
               <span>New Password</span>
-              <input type="password" autoComplete="new-password" minLength={6} value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required />
+              <input type="password" minLength={6} value={passwordForm.newPassword} onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })} required />
             </label>
             <label>
               <span>Confirm New Password</span>
-              <input type="password" autoComplete="new-password" minLength={6} value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} required />
+              <input type="password" minLength={6} value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })} required />
             </label>
             {(error || message) && <p className={error ? 'auth-error' : 'success-message'} role={error ? 'alert' : 'status'}>{error || message}</p>}
             <div className="modal-actions">
               <button type="button" className="secondary-btn" onClick={() => setDialog('')}>Close</button>
-              <button type="submit" className="primary-btn" disabled={saving}>{saving ? 'Saving...' : 'Change Password'}</button>
+              <button type="submit" className="primary-btn" disabled={isChangingPassword}>{isChangingPassword ? 'Changing...' : 'Change Password'}</button>
             </div>
           </form>
         )}

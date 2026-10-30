@@ -7,13 +7,13 @@ import { useRoomMate } from '../context/useRoomMate';
 export default function Expenses() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { expenses, room, profile, saving, addExpense, updateExpense, deleteExpense } = useRoomMate();
-  const members = (room?.members || []).filter((member) => !member.isOwner);
+  const { expenses, room, profile, saving, isMember, addExpense, updateExpense, deleteExpense } = useRoomMate();
+  const participants = room?.members || [];
   const makeEmptyExpense = () => ({
     title: '',
     amount: '',
     category: 'Rent',
-    paidBy: profile?.role === 'Owner' ? members[0]?.name || '' : profile?.name || members[0]?.name || '',
+    paidBy: profile?.name || participants[0]?.name || '',
     date: new Date().toISOString().slice(0, 10),
   });
   const initialEdit = expenses.find((expense) => String(expense.id) === searchParams.get('edit'));
@@ -76,9 +76,9 @@ export default function Expenses() {
         <div>
           <h1>Expenses</h1>
         </div>
-        <button type="button" className="primary-btn" onClick={openCreateModal} disabled={!room || saving}>+ Add Expense</button>
+        <button type="button" className="primary-btn" onClick={openCreateModal} disabled={!isMember || saving}>+ Add Expense</button>
       </div>
-      {!room && <p className="empty-message">Create or join a room in My Room before adding shared expenses.</p>}
+      {!room && <p className="empty-message">Create a room in My Room before adding shared expenses.</p>}
 
       <div className="expenses-summary-row">
         <div className="inline-stat">
@@ -124,7 +124,7 @@ export default function Expenses() {
           <ExpenseCard
             key={expense.id}
             expense={expense}
-            canManage={expense.splitType !== 'room_monthly_rent'}
+            canManage={isMember && expense.splitType !== 'room_monthly_rent'}
             onClick={(id) => navigate(`/expenses/${id}`)}
             onEdit={openEditModal}
             onDelete={handleDelete}
@@ -158,7 +158,7 @@ export default function Expenses() {
           <label>
             <span>Paid By</span>
             <select value={form.paidBy || ''} onChange={(event) => setForm({ ...form, paidBy: event.target.value })} required>
-              {members.map((member) => <option key={member.id} value={member.name}>{member.name}</option>)}
+              {participants.map((member) => <option key={member.id} value={member.name}>{member.name}</option>)}
             </select>
           </label>
 
@@ -170,10 +170,10 @@ export default function Expenses() {
           <label>
             <span>Split Between</span>
             <div className="split-list">
-              {members.map((member) => (
+              {participants.map((member) => (
                 <div key={member.id} className="split-item">
                   <span>{member.name}</span>
-                  <strong>₹{(Number(form.amount || 0) / Math.max(members.length, 1)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
+                  <strong>₹{(Number(form.amount || 0) / Math.max(participants.length, 1)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</strong>
                 </div>
               ))}
             </div>

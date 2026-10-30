@@ -1,15 +1,14 @@
 import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useRoomMate } from '../context/useRoomMate';
+import { apiRequest } from '../services/api';
 import sharedLivingRoomImage from '../assets/shared-living-room.jpg';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 export default function Login() {
   const navigate = useNavigate();
   const { setAuthSession, isLoggedIn, authLoading, error: sessionError, clearError } = useRoomMate();
   const [mode, setMode] = useState('login');
-  const [loginRole, setLoginRole] = useState('owner');
+  const [loginRole, setLoginRole] = useState('member');
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [signupForm, setSignupForm] = useState({ fullName: '', email: '', password: '', confirmPassword: '' });
   const [error, setError] = useState('');
@@ -28,28 +27,20 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
+      const data = await apiRequest('/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        auth: false,
+        body: {
           email: loginForm.email,
           password: loginForm.password,
-          role: loginRole,
-        }),
+          loginType: loginRole === 'owner' ? 'OWNER' : 'MEMBER',
+        },
       });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Invalid email or password');
-      }
 
       setAuthSession(data);
       navigate('/dashboard');
     } catch (loginError) {
-      setError(loginError instanceof TypeError
-        ? 'Cannot reach the backend. Start the RoomMate server and try again.'
-        : loginError.message || 'Invalid email or password');
+      setError(loginError.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }
@@ -74,30 +65,22 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_URL}/auth/signup`, {
+      await apiRequest('/auth/signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        auth: false,
+        body: {
           name: signupForm.fullName,
           email: signupForm.email,
           password: signupForm.password,
-        }),
+        },
       });
-
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Signup failed');
-      }
 
       setSuccess('Account created successfully. Please login.');
       setSignupForm({ fullName: '', email: '', password: '', confirmPassword: '' });
       setLoginForm({ email: '', password: '' });
       setMode('login');
     } catch (signupError) {
-      setError(signupError instanceof TypeError
-        ? 'Cannot reach the backend. Start the RoomMate server and try again.'
-        : signupError.message || 'Signup failed');
+      setError(signupError.message || 'Signup failed');
     } finally {
       setLoading(false);
     }
@@ -145,28 +128,9 @@ export default function Login() {
 
           {mode === 'login' ? (
             <form onSubmit={handleLogin} className="auth-form">
-              <h3>{loginRole === 'owner' ? 'Owner Login' : 'Member Login'}</h3>
-              <p className="muted">Choose the account role to continue</p>
+              <h3>Welcome back</h3>
+              <p className="muted">Sign in to your RoomMate account</p>
               {success && <p className="success-message" role="status">{success}</p>}
-
-              <div className="auth-role-options" role="group" aria-label="Login as">
-                <button
-                  type="button"
-                  className={loginRole === 'owner' ? 'active' : ''}
-                  aria-pressed={loginRole === 'owner'}
-                  onClick={() => setLoginRole('owner')}
-                >
-                  Owner Login
-                </button>
-                <button
-                  type="button"
-                  className={loginRole === 'member' ? 'active' : ''}
-                  aria-pressed={loginRole === 'member'}
-                  onClick={() => setLoginRole('member')}
-                >
-                  Member Login
-                </button>
-              </div>
 
               <label>
                 <span>Email address</span>
@@ -190,9 +154,26 @@ export default function Login() {
                 />
               </label>
 
+              <div className="auth-role-options" aria-label="Choose login type">
+                <button
+                  type="button"
+                  className={loginRole === 'member' ? 'active' : ''}
+                  onClick={() => setLoginRole('member')}
+                >
+                  Member Login
+                </button>
+                <button
+                  type="button"
+                  className={loginRole === 'owner' ? 'active' : ''}
+                  onClick={() => setLoginRole('owner')}
+                >
+                  Owner Login
+                </button>
+              </div>
+
               {(error || sessionError) && <p className="auth-error">{error || sessionError}</p>}
               <button type="submit" className="primary-btn wide" disabled={loading}>
-                {loading ? 'Please wait...' : 'Login'}
+                {loading ? 'Please wait...' : `${loginRole === 'owner' ? 'Owner' : 'Member'} Login`}
               </button>
               <p className="switch-text">
                 Don&apos;t have an account? <button type="button" onClick={() => setMode('signup')}>Sign Up</button>

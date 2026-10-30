@@ -12,9 +12,9 @@ dist
 dist-ssr
 *.local
 .env
-server/.env
+backend/.env
 !.env.example
-!server/.env.example
+!backend/.env.example
 
 # Editor directories and files
 .vscode/*

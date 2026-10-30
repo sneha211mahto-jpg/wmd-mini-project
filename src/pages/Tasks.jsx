@@ -4,8 +4,9 @@ import TaskCard from '../components/TaskCard';
 import { useRoomMate } from '../context/useRoomMate';
 
 export default function Tasks() {
-  const { tasks, room, profile, saving, addTask, updateTask, deleteTask } = useRoomMate();
-  const canManageTasks = profile.role === 'Member';
+  const { tasks, room, profile, saving, isMember, addTask, updateTask, deleteTask } = useRoomMate();
+  const participants = room?.members || [];
+  const canManageTasks = isMember;
   const [filter, setFilter] = useState('All');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({ title: '', assignee: '', dueDate: '', priority: 'Medium' });
@@ -19,7 +20,7 @@ export default function Tasks() {
   const openCreate = () => {
     setForm({
       title: '',
-      assignee: room?.members[0]?.name || '',
+      assignee: participants[0]?.name || '',
       dueDate: new Date().toISOString().slice(0, 10),
       priority: 'Medium',
     });
@@ -64,7 +65,7 @@ export default function Tasks() {
         </div>
         {canManageTasks && <button type="button" className="primary-btn" onClick={openCreate} disabled={!room || saving}>+ Add Task</button>}
       </div>
-      {!room && <p className="empty-message">Create or join a room in My Room before adding shared tasks.</p>}
+      {!room && <p className="empty-message">Create a room in My Room before adding shared tasks.</p>}
 
       <div className="toolbar-row">
         <div className="filter-group">
@@ -87,6 +88,9 @@ export default function Tasks() {
             key={task.id}
             task={task}
             canManage={canManageTasks}
+            canComplete={isMember && participants.some((member) =>
+              Number(member.id) === Number(profile?.id) && member.name.toLowerCase() === task.assignee.toLowerCase()
+            )}
             onToggle={(taskId) => {
               const item = tasks.find((entry) => entry.id === taskId);
               updateTask(taskId, { status: item.status === 'Completed' ? 'Pending' : 'Completed' });
@@ -108,7 +112,7 @@ export default function Tasks() {
           <label>
             <span>Assigned person</span>
             <select value={form.assignee} onChange={(event) => setForm({ ...form, assignee: event.target.value })} required>
-              {(room?.members || []).map((member) => <option key={member.id} value={member.name}>{member.name}</option>)}
+              {participants.map((member) => <option key={member.id} value={member.name}>{member.name}</option>)}
             </select>
           </label>
 

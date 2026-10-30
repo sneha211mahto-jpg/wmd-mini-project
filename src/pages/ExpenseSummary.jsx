@@ -82,8 +82,10 @@ export default function ExpenseSummary() {
     color: categoryColors[name] || '#7890a6',
   }));
 
-  const payerTotals = new Map((room?.members || [])
-    .filter((member) => !member.isOwner)
+  const payerTotals = new Map([
+    ...(room?.members || []).filter((member) => !member.isOwner),
+    ...(room?.owner ? [room.owner] : []),
+  ]
     .map((member) => [member.name, 0]));
   for (const expense of selectedExpenses) {
     if (expense.splitType === 'room_monthly_rent') continue;

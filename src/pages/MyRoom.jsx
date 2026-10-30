@@ -3,14 +3,12 @@ import Modal from '../components/Modal';
 import { useRoomMate } from '../context/useRoomMate';
 
 export default function MyRoom() {
-  const { room, profile, removedMembers, saving, error, clearError, createRoom, joinRoom, leaveRoom, updateRoom, addRoomMember, removeRoomMember } = useRoomMate();
+  const { room, profile, removedMembers, saving, error, clearError, createRoom, leaveRoom, updateRoom, addRoomMember, removeRoomMember } = useRoomMate();
   const isOwner = profile?.role === 'Owner';
   const [showCreate, setShowCreate] = useState(false);
-  const [showJoin, setShowJoin] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [roomForm, setRoomForm] = useState({ name: '', monthlyRent: '' });
-  const [roomCode, setRoomCode] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberMessage, setMemberMessage] = useState('');
 
@@ -19,14 +17,6 @@ export default function MyRoom() {
     const result = await createRoom({ name: roomForm.name, monthlyRent: roomForm.monthlyRent });
     if (!result) return;
     setShowCreate(false);
-  };
-
-  const handleJoinRoom = async (event) => {
-    event.preventDefault();
-    const result = await joinRoom(roomCode);
-    if (!result) return;
-    setShowJoin(false);
-    setRoomCode('');
   };
 
   const handleUpdateRoom = async (event) => {
@@ -89,13 +79,9 @@ export default function MyRoom() {
   if (!room) {
     return (
       <div className="page-panel empty-room-page">
-        <h1>You haven&apos;t joined a room yet.</h1>
+        <h1>You don&apos;t have a room yet.</h1>
         <div className="empty-actions">
-          {isOwner ? (
-            <button type="button" className="primary-btn" onClick={openCreate}>Create Room</button>
-          ) : (
-            <p className="empty-message">Ask the room Owner to invite your account.</p>
-          )}
+          <button type="button" className="primary-btn" onClick={openCreate}>Create Room</button>
         </div>
 
         <Modal open={showCreate} title="Create Room" onClose={() => setShowCreate(false)}>
@@ -112,15 +98,6 @@ export default function MyRoom() {
           </form>
         </Modal>
 
-        <Modal open={showJoin} title="Join Room" onClose={() => setShowJoin(false)}>
-          <form className="form-grid" onSubmit={handleJoinRoom}>
-            <label>
-              <span>Room ID</span>
-              <input type="number" min="1" value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="Enter room ID" required />
-            </label>
-            <button type="submit" className="primary-btn" disabled={saving}>{saving ? 'Joining...' : 'Join'}</button>
-          </form>
-        </Modal>
       </div>
     );
   }
@@ -214,16 +191,6 @@ export default function MyRoom() {
             <input type="number" min="0" step="0.01" value={roomForm.monthlyRent} onChange={(e) => setRoomForm({ ...roomForm, monthlyRent: e.target.value })} required />
           </label>
           <button type="submit" className="primary-btn" disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
-        </form>
-      </Modal>
-
-      <Modal open={showJoin} title="Join Room" onClose={() => setShowJoin(false)}>
-        <form className="form-grid" onSubmit={handleJoinRoom}>
-          <label>
-            <span>Room ID</span>
-            <input type="number" min="1" value={roomCode} onChange={(event) => setRoomCode(event.target.value)} placeholder="Enter room ID" required />
-          </label>
-          <button type="submit" className="primary-btn" disabled={saving}>{saving ? 'Joining...' : 'Join'}</button>
         </form>
       </Modal>
 

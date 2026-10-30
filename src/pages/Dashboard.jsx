@@ -4,8 +4,7 @@ import { useRoomMate } from '../context/useRoomMate';
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { profile, room, expenses, tasks, shopping } = useRoomMate();
-  const isOwner = profile.role === 'Owner';
+  const { profile, room, expenses, tasks, shopping, isOwner } = useRoomMate();
 
   const totalExpenses = expenses.reduce((sum, item) => sum + item.amount, 0);
   const yourShare = expenses.reduce((total, expense) => (
@@ -42,7 +41,7 @@ export default function Dashboard() {
             <div className="room-header">
               <div>
                 <strong>{room?.name || 'No room yet'}</strong>
-                <p>{room ? `${room.activeMemberCount} active Members` : 'Create or join a room to get started'}</p>
+                <p>{room ? `${room.activeMemberCount} active Members` : 'Create a room to get started'}</p>
                 {room?.owner && <p>Owner / Manager: {room.owner.name}</p>}
               </div>
               <div className="mini-avatar-stack">
@@ -64,7 +63,7 @@ export default function Dashboard() {
               <span>{isOwner ? 'Owner / Manager' : 'Your rent contribution'}</span>
               {!isOwner && <strong>₹{Number(room?.yourShare || 0).toLocaleString('en-IN')}</strong>}
             </div>
-            {!room && <button type="button" className="secondary-btn" onClick={() => navigate('/my-room')}>Create or join a room</button>}
+            {!room && <button type="button" className="secondary-btn" onClick={() => navigate('/my-room')}>Create a room</button>}
           </div>
         </div>
 
@@ -92,8 +91,8 @@ export default function Dashboard() {
           </div>
           <div className="quick-actions">
             <button type="button" onClick={() => navigate('/expenses')}>Add Expense</button>
-            {!isOwner && <button type="button" onClick={() => navigate('/tasks')}>Add Task</button>}
-            {!isOwner && <button type="button" onClick={() => navigate('/shopping-list')}>Add Shopping Item</button>}
+            {room && <button type="button" onClick={() => navigate('/tasks')}>Add Task</button>}
+            {room && <button type="button" onClick={() => navigate('/shopping-list')}>Add Shopping Item</button>}
             <button type="button" onClick={() => navigate('/my-room')}>{isOwner ? 'Manage Room' : 'View My Room'}</button>
           </div>
         </div>
